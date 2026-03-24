@@ -1,6 +1,7 @@
 import pygame
 import sys
 import random
+import math
 
 # Initialize pygame
 pygame.init()
@@ -8,7 +9,7 @@ pygame.init()
 # Screen settings
 WIDTH, HEIGHT = 800, 600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Simple Robot Simulation")
+pygame.display.set_caption("Simple Robot Simulation with Collision Detection")
 
 # Colors
 WHITE = (255, 255, 255)
@@ -17,6 +18,7 @@ RED = (255, 80, 80)       # Human
 YELLOW = (255, 215, 0)    # Goal
 BLACK = (40, 40, 40)      # Obstacles
 GREEN = (0, 180, 0)
+ORANGE = (255, 140, 0)
 
 clock = pygame.time.Clock()
 
@@ -41,12 +43,28 @@ obstacles = [
     pygame.Rect(300, 400, 120, 50)
 ]
 
+font = pygame.font.SysFont(None, 36)
+
 def draw_star(surface, x, y, size, color):
-    # Simple star-like shape using lines
     pygame.draw.line(surface, color, (x, y - size), (x, y + size), 3)
     pygame.draw.line(surface, color, (x - size, y), (x + size, y), 3)
     pygame.draw.line(surface, color, (x - size // 2, y - size // 2), (x + size // 2, y + size // 2), 3)
     pygame.draw.line(surface, color, (x + size // 2, y - size // 2), (x - size // 2, y + size // 2), 3)
+
+def circle_rect_collision(circle_x, circle_y, radius, rect):
+    # Find the closest point on the rectangle to the circle center
+    closest_x = max(rect.left, min(circle_x, rect.right))
+    closest_y = max(rect.top, min(circle_y, rect.bottom))
+
+    # Calculate distance from circle center to closest point
+    distance_x = circle_x - closest_x
+    distance_y = circle_y - closest_y
+
+    return (distance_x ** 2 + distance_y ** 2) < (radius ** 2)
+
+def circle_circle_collision(x1, y1, r1, x2, y2, r2):
+    distance = math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
+    return distance < (r1 + r2)
 
 def move_human():
     global human_x, human_y
@@ -58,18 +76,32 @@ def move_human():
     new_y = human_y + dy
 
     # Keep human inside screen
-    if 20 <= new_x <= WIDTH - 20:
+    if not (human_radius <= new_x <= WIDTH - human_radius):
+        new_x = human_x
+    if not (human_radius <= new_y <= HEIGHT - human_radius):
+        new_y = human_y
+
+    # Prevent human from going through obstacles
+    collided_with_obstacle = False
+    for obstacle in obstacles:
+        if circle_rect_collision(new_x, new_y, human_radius, obstacle):
+            collided_with_obstacle = True
+            break
+
+    if not collided_with_obstacle:
         human_x = new_x
-    if 20 <= new_y <= HEIGHT - 20:
         human_y = new_y
 
 def robot_reached_goal():
     return abs(robot_x - goal_x) < 25 and abs(robot_y - goal_y) < 25
 
 running = True
+collision_message = ""
+
 while running:
     clock.tick(30)
     screen.fill(WHITE)
+    collision_message = ""
 
     # Events
     for event in pygame.event.get():
@@ -89,11 +121,37 @@ while running:
     if keys[pygame.K_DOWN]:
         new_robot_y += robot_speed
 
-    # Keep robot inside screen
-    if 20 <= new_robot_x <= WIDTH - 20:
+    # Check screen boundary collision
+    boundary_collision = False
+    if not (robot_radius <= new_robot_x <= WIDTH - robot_radius):
+        boundary_collision = True
+    if not (robot_radius <= new_robot_y <= HEIGHT - robot_radius):
+        boundary_collision = True
+
+    # Check obstacle collision
+    obstacle_collision = False
+    for obstacle in obstacles:
+        if circle_rect_collision(new_robot_x, new_robot_y, robot_radius, obstacle):
+            obstacle_collision = True
+            break
+
+    # Check human collision
+    human_collision = circle_circle_collision(
+        new_robot_x, new_robot_y, robot_radius,
+        human_x, human_y, human_radius
+    )
+
+    # Only move robot if no collision
+    if not boundary_collision and not obstacle_collision and not human_collision:
         robot_x = new_robot_x
-    if 20 <= new_robot_y <= HEIGHT - 20:
         robot_y = new_robot_y
+    else:
+        if boundary_collision:
+            collision_message = "Boundary collision!"
+        elif obstacle_collision:
+            collision_message = "Obstacle collision!"
+        elif human_collision:
+            collision_message = "Human collision!"
 
     # Move human
     move_human()
@@ -111,11 +169,15 @@ while running:
     # Draw robot
     pygame.draw.circle(screen, BLUE, (robot_x, robot_y), robot_radius)
 
-    # Check if robot reached goal
+    # Show goal reached message
     if robot_reached_goal():
-        font = pygame.font.SysFont(None, 48)
         text = font.render("Goal Reached!", True, GREEN)
-        screen.blit(text, (300, 40))
+        screen.blit(text, (300, 30))
+
+    # Show collision message
+    if collision_message:
+        text = font.render(collision_message, True, ORANGE)
+        screen.blit(text, (280, 70))
 
     pygame.display.flip()
 
