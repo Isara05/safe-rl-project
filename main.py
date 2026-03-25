@@ -45,6 +45,11 @@ obstacles = [
 
 font = pygame.font.SysFont(None, 36)
 
+# Task completion time variables
+start_time = pygame.time.get_ticks()
+completion_time = None
+goal_reached = False
+
 def draw_star(surface, x, y, size, color):
     pygame.draw.line(surface, color, (x, y - size), (x, y + size), 3)
     pygame.draw.line(surface, color, (x - size, y), (x + size, y), 3)
@@ -52,11 +57,9 @@ def draw_star(surface, x, y, size, color):
     pygame.draw.line(surface, color, (x + size // 2, y - size // 2), (x - size // 2, y + size // 2), 3)
 
 def circle_rect_collision(circle_x, circle_y, radius, rect):
-    # Find the closest point on the rectangle to the circle center
     closest_x = max(rect.left, min(circle_x, rect.right))
     closest_y = max(rect.top, min(circle_y, rect.bottom))
 
-    # Calculate distance from circle center to closest point
     distance_x = circle_x - closest_x
     distance_y = circle_y - closest_y
 
@@ -108,53 +111,59 @@ while running:
         if event.type == pygame.QUIT:
             running = False
 
-    # Keyboard movement for robot
-    keys = pygame.key.get_pressed()
-    new_robot_x, new_robot_y = robot_x, robot_y
+    # Only allow movement until goal is reached
+    if not goal_reached:
+        keys = pygame.key.get_pressed()
+        new_robot_x, new_robot_y = robot_x, robot_y
 
-    if keys[pygame.K_LEFT]:
-        new_robot_x -= robot_speed
-    if keys[pygame.K_RIGHT]:
-        new_robot_x += robot_speed
-    if keys[pygame.K_UP]:
-        new_robot_y -= robot_speed
-    if keys[pygame.K_DOWN]:
-        new_robot_y += robot_speed
+        if keys[pygame.K_LEFT]:
+            new_robot_x -= robot_speed
+        if keys[pygame.K_RIGHT]:
+            new_robot_x += robot_speed
+        if keys[pygame.K_UP]:
+            new_robot_y -= robot_speed
+        if keys[pygame.K_DOWN]:
+            new_robot_y += robot_speed
 
-    # Check screen boundary collision
-    boundary_collision = False
-    if not (robot_radius <= new_robot_x <= WIDTH - robot_radius):
-        boundary_collision = True
-    if not (robot_radius <= new_robot_y <= HEIGHT - robot_radius):
-        boundary_collision = True
+        # Check screen boundary collision
+        boundary_collision = False
+        if not (robot_radius <= new_robot_x <= WIDTH - robot_radius):
+            boundary_collision = True
+        if not (robot_radius <= new_robot_y <= HEIGHT - robot_radius):
+            boundary_collision = True
 
-    # Check obstacle collision
-    obstacle_collision = False
-    for obstacle in obstacles:
-        if circle_rect_collision(new_robot_x, new_robot_y, robot_radius, obstacle):
-            obstacle_collision = True
-            break
+        # Check obstacle collision
+        obstacle_collision = False
+        for obstacle in obstacles:
+            if circle_rect_collision(new_robot_x, new_robot_y, robot_radius, obstacle):
+                obstacle_collision = True
+                break
 
-    # Check human collision
-    human_collision = circle_circle_collision(
-        new_robot_x, new_robot_y, robot_radius,
-        human_x, human_y, human_radius
-    )
+        # Check human collision
+        human_collision = circle_circle_collision(
+            new_robot_x, new_robot_y, robot_radius,
+            human_x, human_y, human_radius
+        )
 
-    # Only move robot if no collision
-    if not boundary_collision and not obstacle_collision and not human_collision:
-        robot_x = new_robot_x
-        robot_y = new_robot_y
-    else:
-        if boundary_collision:
-            collision_message = "Boundary collision!"
-        elif obstacle_collision:
-            collision_message = "Obstacle collision!"
-        elif human_collision:
-            collision_message = "Human collision!"
+        # Only move robot if no collision
+        if not boundary_collision and not obstacle_collision and not human_collision:
+            robot_x = new_robot_x
+            robot_y = new_robot_y
+        else:
+            if boundary_collision:
+                collision_message = "Boundary collision!"
+            elif obstacle_collision:
+                collision_message = "Obstacle collision!"
+            elif human_collision:
+                collision_message = "Human collision!"
 
-    # Move human
-    move_human()
+        # Move human only while game is active
+        move_human()
+
+        # Check goal and save completion time once
+        if robot_reached_goal():
+            goal_reached = True
+            completion_time = (pygame.time.get_ticks() - start_time) / 1000
 
     # Draw obstacles
     for obstacle in obstacles:
@@ -169,15 +178,24 @@ while running:
     # Draw robot
     pygame.draw.circle(screen, BLUE, (robot_x, robot_y), robot_radius)
 
-    # Show goal reached message
-    if robot_reached_goal():
+    # Show goal reached message and completion time
+    if goal_reached:
         text = font.render("Goal Reached!", True, GREEN)
-        screen.blit(text, (300, 30))
+        screen.blit(text, (280, 30))
+
+        time_text = font.render(f"Task Completion Time: {completion_time:.2f}s", True, GREEN)
+        screen.blit(time_text, (180, 70))
+
+    # Show live timer before reaching the goal
+    else:
+        current_time = (pygame.time.get_ticks() - start_time) / 1000
+        timer_text = font.render(f"Time: {current_time:.2f}s", True, BLACK)
+        screen.blit(timer_text, (20, 20))
 
     # Show collision message
     if collision_message:
         text = font.render(collision_message, True, ORANGE)
-        screen.blit(text, (280, 70))
+        screen.blit(text, (250, 110))
 
     pygame.display.flip()
 
