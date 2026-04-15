@@ -66,7 +66,7 @@ ROBOT_RADIUS = 22
 AGV_RADIUS = 20
 HUMAN_RADIUS = 18
 
-SAFE_DISTANCE = 150       # 1.5m
+SAFE_DISTANCE = 150
 DANGER_DISTANCE = 110
 
 ROBOT_BASE_SPEED = 4.6
@@ -80,7 +80,10 @@ AGV_DANGER_SPEED = 0.75
 HUMAN_SPEED = 1.0
 GOAL_REACHED_DISTANCE = 30
 CHARGING_REACHED_DISTANCE = 28
-WAYPOINT_REACHED_DISTANCE = 32
+WAYPOINT_REACHED_DISTANCE = 26
+
+ANGLE_SMOOTHING = 0.22
+MESSAGE_HOLD_TIME = 0.25
 
 
 def normalize(dx, dy):
@@ -124,6 +127,19 @@ def distance_circle_to_rect_edge(circle_x, circle_y, rect):
     return math.sqrt(dx * dx + dy * dy)
 
 
+def normalize_angle(angle):
+    while angle > 180:
+        angle -= 360
+    while angle < -180:
+        angle += 360
+    return angle
+
+
+def smooth_angle(current, target, factor=ANGLE_SMOOTHING):
+    delta = normalize_angle(target - current)
+    return current + delta * factor
+
+
 class WarehouseSimulation(arcade.Window):
     def __init__(self):
         super().__init__(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE)
@@ -155,6 +171,8 @@ class WarehouseSimulation(arcade.Window):
         self.agv_collision_message = ""
         self.agv_proximity_message = ""
         self.agv_charge_pulse_time = 0.0
+        self.agv_stuck_frames = 0
+        self.agv_last_position = (self.agv_x, self.agv_y)
 
         # Charging point
         self.charger_x = 140
@@ -167,16 +185,17 @@ class WarehouseSimulation(arcade.Window):
         self.agv_charge_rate = 0.45
         self.agv_mode = "WORKING"  # WORKING, GOING_TO_CHARGE, CHARGING, RETURNING
 
-        # AGV route
+        # AGV route: kept in clear aisles
         self.agv_demo_waypoints = [
-            (1220, 160),
-            (1220, 420),
-            (980, 420),
-            (980, 720),
-            (1320, 720),
-            (620, 820),
+            (1120, 160),
+            (1120, 300),
+            (980, 300),
+            (980, 620),
+            (1320, 620),
+            (1320, 860),
+            (620, 860),
             (620, 520),
-            (1120, 250),
+            (920, 250),
         ]
         self.agv_waypoint_index = 0
 
@@ -186,14 +205,12 @@ class WarehouseSimulation(arcade.Window):
             {"x": 1090, "y": 320, "dx": 0, "dy": HUMAN_SPEED, "shirt": HUMAN_SHIRT_2},
         ]
 
-        # Smaller obstacles with wider spacing
+        # Obstacles
         self.obstacles = [
             (260, 820, 90, 36),
             (260, 420, 90, 36),
-
             (760, 820, 90, 36),
             (760, 420, 90, 36),
-
             (1260, 820, 90, 36),
             (1260, 420, 90, 36),
         ]
@@ -204,6 +221,15 @@ class WarehouseSimulation(arcade.Window):
         self.down_pressed = False
 
         self.start_time = time.time()
+
+        # Stable dashboard message state
+        self.robot_message_until = 0.0
+        self.robot_display_message = ""
+        self.robot_display_message_color = WARNING_COLOR
+
+        self.agv_message_until = 0.0
+        self.agv_display_message = ""
+        self.agv_display_message_color = WARNING_COLOR
 
     # -----------------------------
     # Utility
@@ -256,6 +282,110 @@ class WarehouseSimulation(arcade.Window):
                 return False
 
         return True
+
+    def set_robot_display_message(self, message, color):
+        if not message:
+            return
+        self.robot_display_message = message
+        self.robot_display_message_color = color
+        self.robot_message_until = time.time() + MESSAGE_HOLD_TIME
+
+    def set_agv_display_message(self, message, color):
+        if not message:
+            return
+        self.agv_display_message = message
+        self.agv_display_message_color = color
+        self.agv_message_until = time.time() + MESSAGE_HOLD_TIME
+
+    def refresh_display_messages(self):
+        now = time.time()
+
+        if self.goal_reached:
+            self.robot_display_message = "Robot reached goal"
+            self.robot_display_message_color = SUCCESS_COLOR
+        elif self.robot_collision_message:
+            self.set_robot_display_message(self.robot_collision_message, COLLISION_COLOR)
+        elif self.robot_proximity_message:
+            self.set_robot_display_message(self.robot_proximity_message, WARNING_COLOR)
+        elif now > self.robot_message_until:
+            self.robot_display_message = ""
+
+        if self.agv_mode == "CHARGING":
+            self.agv_display_message = "Charging at station"
+            self.agv_display_message_color = SUCCESS_COLOR
+        elif self.agv_collision_message:
+            self.set_agv_display_message(self.agv_collision_message, COLLISION_COLOR)
+        elif self.agv_proximity_message:
+            self.set_agv_display_message(self.agv_proximity_message, WARNING_COLOR)
+        elif now > self.agv_message_until:
+            self.agv_display_message = ""
+
+    def can_agv_occupy(self, x, y):
+        blocked_type = self.position_blocked(x, y, AGV_RADIUS)
+        if blocked_type is not None:
+            return False
+
+        for human in self.humans:
+            d = self.distance_between(x, y, human["x"], human["y"])
+            if d < (AGV_RADIUS + HUMAN_RADIUS + 2):
+                return False
+
+        d_robot = self.distance_between(x, y, self.robot_x, self.robot_y)
+        if d_robot < (AGV_RADIUS + ROBOT_RADIUS + 4):
+            return False
+
+        return True
+
+    def get_nearest_obstacle_to_agv(self):
+        nearest_obstacle = None
+        nearest_distance = float("inf")
+
+        for obstacle in self.obstacles:
+            ox, oy, _, _ = obstacle
+            d = self.distance_between(self.agv_x, self.agv_y, ox, oy)
+            if d < nearest_distance:
+                nearest_distance = d
+                nearest_obstacle = obstacle
+
+        return nearest_obstacle, nearest_distance
+
+    def build_agv_recovery_vector(self, target_dx, target_dy):
+        obstacle, obstacle_dist = self.get_nearest_obstacle_to_agv()
+
+        if obstacle is not None and obstacle_dist < 140:
+            ox, oy, _, _ = obstacle
+
+            away_dx = self.agv_x - ox
+            away_dy = self.agv_y - oy
+            away_dx, away_dy = normalize(away_dx, away_dy)
+
+            side_dx = -away_dy
+            side_dy = away_dx
+
+            if side_dx * target_dx + side_dy * target_dy < 0:
+                side_dx *= -1
+                side_dy *= -1
+
+            recovery_dx = away_dx * 1.4 + side_dx * 1.2 + target_dx * 0.35
+            recovery_dy = away_dy * 1.4 + side_dy * 1.2 + target_dy * 0.35
+            return normalize(recovery_dx, recovery_dy)
+
+        side_dx = -target_dy
+        side_dy = target_dx
+        return normalize(side_dx + target_dx * 0.4, side_dy + target_dy * 0.4)
+
+    def waypoint_blocked(self, waypoint):
+        wx, wy = waypoint
+        return self.position_blocked(wx, wy, AGV_RADIUS) is not None
+
+    def skip_blocked_agv_waypoints(self):
+        checked = 0
+        while checked < len(self.agv_demo_waypoints):
+            waypoint = self.agv_demo_waypoints[self.agv_waypoint_index]
+            if not self.waypoint_blocked(waypoint):
+                return
+            self.agv_waypoint_index = (self.agv_waypoint_index + 1) % len(self.agv_demo_waypoints)
+            checked += 1
 
     # -----------------------------
     # Human movement
@@ -364,7 +494,7 @@ class WarehouseSimulation(arcade.Window):
         self.robot_collision_message = ""
 
         if move_dx == 0 and move_dy == 0:
-            return
+            return False
 
         step = self.robot_speed
         candidates = [
@@ -393,10 +523,13 @@ class WarehouseSimulation(arcade.Window):
                     break
 
             if safe:
-                self.robot_angle = math.degrees(math.atan2(ny - self.robot_y, nx - self.robot_x))
+                move_angle = math.degrees(math.atan2(ny - self.robot_y, nx - self.robot_x))
+                self.robot_angle = smooth_angle(self.robot_angle, move_angle)
                 self.robot_x = nx
                 self.robot_y = ny
-                return
+                return True
+
+        return False
 
     def check_goal(self):
         d = self.distance_between(self.robot_x, self.robot_y, self.goal_x, self.goal_y)
@@ -440,17 +573,27 @@ class WarehouseSimulation(arcade.Window):
 
     def update_agv_route_progress(self):
         if self.agv_mode not in ["WORKING", "RETURNING"]:
-            return
+            return False
+
+        self.skip_blocked_agv_waypoints()
 
         target_x, target_y = self.agv_demo_waypoints[self.agv_waypoint_index]
         d = self.distance_between(self.agv_x, self.agv_y, target_x, target_y)
 
         if d <= WAYPOINT_REACHED_DISTANCE:
+            self.agv_x = target_x
+            self.agv_y = target_y
             self.agv_waypoint_index = (self.agv_waypoint_index + 1) % len(self.agv_demo_waypoints)
+            self.skip_blocked_agv_waypoints()
+            return True
+
+        return False
 
     def get_current_agv_target(self):
         if self.agv_mode in ["GOING_TO_CHARGE", "CHARGING"]:
             return self.charger_x, self.charger_y
+
+        self.skip_blocked_agv_waypoints()
         return self.agv_demo_waypoints[self.agv_waypoint_index]
 
     def update_agv_risk_state(self):
@@ -482,12 +625,15 @@ class WarehouseSimulation(arcade.Window):
         if self.agv_mode == "CHARGING":
             self.agv_proximity_message = "Charging at station"
             return
+        if self.agv_mode == "GOING_TO_CHARGE":
+            self.agv_proximity_message = "Going to charger"
+            return
 
         human_clearance = self.nearest_human_clearance(self.agv_x, self.agv_y, AGV_RADIUS)
         obstacle_clearance = self.nearest_obstacle_distance(self.agv_x, self.agv_y, AGV_RADIUS)
         robot_clearance = self.robot_clearance_from_point(self.agv_x, self.agv_y, AGV_RADIUS)
 
-        nearest_type = min(
+        nearest_name, nearest_value = min(
             [
                 ("human", human_clearance),
                 ("obstacle", obstacle_clearance),
@@ -495,8 +641,6 @@ class WarehouseSimulation(arcade.Window):
             ],
             key=lambda item: item[1]
         )
-
-        nearest_name, nearest_value = nearest_type
 
         if nearest_value < DANGER_DISTANCE:
             self.agv_proximity_message = f"High risk: {nearest_name} nearby"
@@ -521,13 +665,13 @@ class WarehouseSimulation(arcade.Window):
                 side_dx = -away_dy
                 side_dy = away_dx
 
-                dot = side_dx * intended_dx + side_dy * intended_dy
-                if dot < 0:
+                if side_dx * intended_dx + side_dy * intended_dy < 0:
                     side_dx *= -1
                     side_dy *= -1
 
-                final_dx += away_dx * 1.8 + side_dx * 1.0
-                final_dy += away_dy * 1.8 + side_dy * 1.0
+                weight = 2.0 if d < DANGER_DISTANCE else 1.1
+                final_dx += away_dx * weight + side_dx * 0.7
+                final_dy += away_dy * weight + side_dy * 0.7
                 active_avoidance = True
 
         # Avoid main robot
@@ -540,39 +684,30 @@ class WarehouseSimulation(arcade.Window):
             side_dx = -away_dy
             side_dy = away_dx
 
-            dot = side_dx * intended_dx + side_dy * intended_dy
-            if dot < 0:
+            if side_dx * intended_dx + side_dy * intended_dy < 0:
                 side_dx *= -1
                 side_dy *= -1
 
-            final_dx += away_dx * 1.8 + side_dx * 1.0
-            final_dy += away_dy * 1.8 + side_dy * 1.0
+            weight = 2.0 if d_robot < DANGER_DISTANCE else 1.1
+            final_dx += away_dx * weight + side_dx * 0.7
+            final_dy += away_dy * weight + side_dy * 0.7
             active_avoidance = True
 
-        # Avoid obstacles before collision
-        look_ahead = 70
+        # Light predictive obstacle avoidance
+        look_ahead = 26
         future_x = self.agv_x + intended_dx * look_ahead
         future_y = self.agv_y + intended_dy * look_ahead
 
         for obstacle in self.obstacles:
             future_clearance = max(0, distance_circle_to_rect_edge(future_x, future_y, obstacle) - AGV_RADIUS)
-            if future_clearance < SAFE_DISTANCE:
+            if future_clearance < 18:
                 ox, oy, _, _ = obstacle
                 away_dx = self.agv_x - ox
                 away_dy = self.agv_y - oy
                 away_dx, away_dy = normalize(away_dx, away_dy)
 
-                side_dx = -away_dy
-                side_dy = away_dx
-
-                dot = side_dx * intended_dx + side_dy * intended_dy
-                if dot < 0:
-                    side_dx *= -1
-                    side_dy *= -1
-
-                weight = 2.2 if future_clearance < DANGER_DISTANCE else 1.3
-                final_dx += away_dx * weight + side_dx * 1.0
-                final_dy += away_dy * weight + side_dy * 1.0
+                final_dx += away_dx * 0.5
+                final_dy += away_dy * 0.5
                 active_avoidance = True
 
         if active_avoidance:
@@ -583,52 +718,54 @@ class WarehouseSimulation(arcade.Window):
     def try_move_agv(self, move_dx, move_dy):
         self.agv_collision_message = ""
 
-        if move_dx == 0 and move_dy == 0 or self.agv_mode == "CHARGING":
-            return
+        if (move_dx == 0 and move_dy == 0) or self.agv_mode == "CHARGING":
+            return False
 
         step = self.agv_speed
+
         candidates = [
             (self.agv_x + move_dx * step, self.agv_y + move_dy * step),
+            (self.agv_x + move_dx * step * 0.7, self.agv_y + move_dy * step * 0.7),
+            (self.agv_x + move_dx * step * 0.4, self.agv_y + move_dy * step * 0.4),
             (self.agv_x + move_dx * step, self.agv_y),
             (self.agv_x, self.agv_y + move_dy * step),
-            (self.agv_x + move_dy * step * 0.8, self.agv_y - move_dx * step * 0.8),
-            (self.agv_x - move_dy * step * 0.8, self.agv_y + move_dx * step * 0.8),
-            (self.agv_x + move_dx * step * 0.5, self.agv_y + move_dy * step * 0.5),
+            (self.agv_x + move_dy * step * 0.9, self.agv_y - move_dx * step * 0.9),
+            (self.agv_x - move_dy * step * 0.9, self.agv_y + move_dx * step * 0.9),
         ]
+
+        obstacle_seen = False
 
         for nx, ny in candidates:
             blocked_type = self.position_blocked(nx, ny, AGV_RADIUS)
             if blocked_type == "obstacle":
+                obstacle_seen = True
                 continue
             elif blocked_type == "wall":
                 continue
 
-            safe = True
+            if not self.can_agv_occupy(nx, ny):
+                continue
 
-            for human in self.humans:
-                d = self.distance_between(nx, ny, human["x"], human["y"])
-                if d < (AGV_RADIUS + HUMAN_RADIUS + 2):
-                    safe = False
-                    break
+            move_angle = math.degrees(math.atan2(ny - self.agv_y, nx - self.agv_x))
+            self.agv_angle = smooth_angle(self.agv_angle, move_angle)
+            self.agv_x = nx
+            self.agv_y = ny
+            return True
 
-            if safe:
-                d_robot = self.distance_between(nx, ny, self.robot_x, self.robot_y)
-                if d_robot < (AGV_RADIUS + ROBOT_RADIUS + 4):
-                    safe = False
+        if obstacle_seen:
+            self.agv_collision_message = "Obstacle collision"
 
-            if safe:
-                self.agv_angle = math.degrees(math.atan2(ny - self.agv_y, nx - self.agv_x))
-                self.agv_x = nx
-                self.agv_y = ny
-                return
+        return False
 
     def update_agv(self):
         self.update_agv_battery()
         self.update_agv_mode()
-        self.update_agv_risk_state()
-        self.update_agv_proximity_warning()
 
         if self.agv_mode == "CHARGING":
+            self.update_agv_risk_state()
+            self.update_agv_proximity_warning()
+            self.agv_stuck_frames = 0
+            self.agv_last_position = (self.agv_x, self.agv_y)
             return
 
         self.update_agv_route_progress()
@@ -639,7 +776,36 @@ class WarehouseSimulation(arcade.Window):
         move_dx, move_dy = normalize(dx, dy)
 
         safe_dx, safe_dy = self.build_safety_vector_for_agv(move_dx, move_dy)
-        self.try_move_agv(safe_dx, safe_dy)
+        moved = self.try_move_agv(safe_dx, safe_dy)
+
+        if not moved:
+            moved = self.try_move_agv(move_dx, move_dy)
+
+        current_pos = (round(self.agv_x, 2), round(self.agv_y, 2))
+        last_pos = (round(self.agv_last_position[0], 2), round(self.agv_last_position[1], 2))
+
+        if moved and current_pos != last_pos:
+            self.agv_stuck_frames = 0
+        else:
+            self.agv_stuck_frames += 1
+
+        if self.agv_stuck_frames >= 6:
+            recovery_dx, recovery_dy = self.build_agv_recovery_vector(move_dx, move_dy)
+            recovery_moved = self.try_move_agv(recovery_dx, recovery_dy)
+
+            if recovery_moved:
+                self.agv_stuck_frames = 0
+                self.agv_collision_message = "Recovering from obstacle"
+            else:
+                self.agv_waypoint_index = (self.agv_waypoint_index + 1) % len(self.agv_demo_waypoints)
+                self.skip_blocked_agv_waypoints()
+                self.agv_stuck_frames = 0
+
+        self.agv_last_position = (self.agv_x, self.agv_y)
+
+        self.update_agv_route_progress()
+        self.update_agv_risk_state()
+        self.update_agv_proximity_warning()
 
     # -----------------------------
     # Drawing
@@ -729,7 +895,9 @@ class WarehouseSimulation(arcade.Window):
         cos_a = math.cos(rad)
         sin_a = math.sin(rad)
 
-        arcade.draw_ellipse_filled(x, y - 26 * radius_scale, 34 * radius_scale, 10 * radius_scale, (150, 150, 150, 90))
+        arcade.draw_ellipse_filled(
+            x, y - 26 * radius_scale, 34 * radius_scale, 10 * radius_scale, (150, 150, 150, 90)
+        )
 
         arcade.draw_rect_filled(
             arcade.XYWH(x, y, 48 * radius_scale, 34 * radius_scale),
@@ -761,42 +929,64 @@ class WarehouseSimulation(arcade.Window):
 
     def draw_info_panel(self):
         panel_x = 15
-        panel_y = SCREEN_HEIGHT - 295
-        panel_w = 560
-        panel_h = 260
+        panel_y = SCREEN_HEIGHT - 255
+        panel_w = 500
+        panel_h = 220
 
         arcade.draw_lbwh_rectangle_filled(panel_x, panel_y, panel_w, panel_h, PANEL_COLOR)
         arcade.draw_lbwh_rectangle_outline(panel_x, panel_y, panel_w, panel_h, PANEL_BORDER, 2)
 
         current_time = self.completion_time if self.goal_reached else (time.time() - self.start_time)
 
-        arcade.draw_text("Warehouse Safety Dashboard", 28, SCREEN_HEIGHT - 50, TEXT_COLOR, 14, bold=True)
-        arcade.draw_text(f"Time: {current_time:.2f}s", 28, SCREEN_HEIGHT - 78, TEXT_COLOR, 11)
+        # Title row
+        arcade.draw_text("Warehouse Safety Dashboard", panel_x + 14, SCREEN_HEIGHT - 45, TEXT_COLOR, 14, bold=True)
+        arcade.draw_text(f"Time: {current_time:.2f}s", panel_x + 355, SCREEN_HEIGHT - 45, TEXT_COLOR, 11)
 
-        arcade.draw_text("MAIN ROBOT", 28, SCREEN_HEIGHT - 108, INFO_COLOR, 12, bold=True)
-        arcade.draw_text(f"State: {self.robot_status}", 28, SCREEN_HEIGHT - 130, TEXT_COLOR, 11)
-        arcade.draw_text(f"Speed: {self.robot_speed:.1f}", 28, SCREEN_HEIGHT - 150, TEXT_COLOR, 11)
+        arcade.draw_line(
+            panel_x + 12, SCREEN_HEIGHT - 58,
+            panel_x + panel_w - 12, SCREEN_HEIGHT - 58,
+            PANEL_BORDER, 1
+        )
 
-        if self.goal_reached:
-            arcade.draw_text("Robot reached goal", 250, SCREEN_HEIGHT - 130, SUCCESS_COLOR, 11, bold=True)
-        elif self.robot_collision_message:
-            arcade.draw_text(self.robot_collision_message, 250, SCREEN_HEIGHT - 130, COLLISION_COLOR, 11, bold=True)
-        elif self.robot_proximity_message:
-            arcade.draw_text(self.robot_proximity_message, 250, SCREEN_HEIGHT - 130, WARNING_COLOR, 11, bold=True)
+        # Robot section
+        robot_y = SCREEN_HEIGHT - 88
+        arcade.draw_text("MAIN ROBOT", panel_x + 14, robot_y, INFO_COLOR, 12, bold=True)
+        arcade.draw_text(f"State: {self.robot_status}", panel_x + 14, robot_y - 24, TEXT_COLOR, 11)
+        arcade.draw_text(f"Speed: {self.robot_speed:.1f}", panel_x + 180, robot_y - 24, TEXT_COLOR, 11)
 
-        arcade.draw_text("AGV", 28, SCREEN_HEIGHT - 210, INFO_COLOR, 12, bold=True)
-        arcade.draw_text(f"Mode: {self.agv_mode}", 28, SCREEN_HEIGHT - 232, TEXT_COLOR, 11)
-        arcade.draw_text(f"Battery: {self.agv_battery:.1f}%", 28, SCREEN_HEIGHT - 252, TEXT_COLOR, 11)
-        arcade.draw_text(f"State: {self.agv_status}", 190, SCREEN_HEIGHT - 232, TEXT_COLOR, 11)
-        arcade.draw_text(f"Speed: {self.agv_speed:.1f}", 190, SCREEN_HEIGHT - 252, TEXT_COLOR, 11)
+        if self.robot_display_message:
+            arcade.draw_text(
+                self.robot_display_message,
+                panel_x + 14,
+                robot_y - 48,
+                self.robot_display_message_color,
+                11,
+                bold=True
+            )
 
-        if self.agv_collision_message:
-            arcade.draw_text(self.agv_collision_message, 350, SCREEN_HEIGHT - 232, COLLISION_COLOR, 11, bold=True)
-        elif self.agv_proximity_message:
-            arcade.draw_text(self.agv_proximity_message, 350, SCREEN_HEIGHT - 232, WARNING_COLOR, 11, bold=True)
+        arcade.draw_line(
+            panel_x + 12, robot_y - 64,
+            panel_x + panel_w - 12, robot_y - 64,
+            PANEL_BORDER, 1
+        )
 
-        if self.agv_mode == "CHARGING":
-            arcade.draw_text("AGV charging: 20% -> 100%", 28, SCREEN_HEIGHT - 278, SUCCESS_COLOR, 11, bold=True)
+        # AGV section
+        agv_y = robot_y - 90
+        arcade.draw_text("AGV", panel_x + 14, agv_y, INFO_COLOR, 12, bold=True)
+        arcade.draw_text(f"Mode: {self.agv_mode}", panel_x + 14, agv_y - 24, TEXT_COLOR, 11)
+        arcade.draw_text(f"State: {self.agv_status}", panel_x + 180, agv_y - 24, TEXT_COLOR, 11)
+        arcade.draw_text(f"Battery: {self.agv_battery:.1f}%", panel_x + 14, agv_y - 48, TEXT_COLOR, 11)
+        arcade.draw_text(f"Speed: {self.agv_speed:.1f}", panel_x + 180, agv_y - 48, TEXT_COLOR, 11)
+
+        if self.agv_display_message:
+            arcade.draw_text(
+                self.agv_display_message,
+                panel_x + 14,
+                agv_y - 72,
+                self.agv_display_message_color,
+                11,
+                bold=True
+            )
 
     # -----------------------------
     # Main draw/update
@@ -819,27 +1009,27 @@ class WarehouseSimulation(arcade.Window):
             pulse_radius = 28 + 6 * math.sin(self.agv_charge_pulse_time)
             arcade.draw_circle_outline(self.agv_x, self.agv_y, pulse_radius, AGV_CHARGING, 3)
 
-        arcade.draw_text("ROBOT", self.robot_x - 28, self.robot_y + 34, arcade.color.BLACK, 10, bold=True)
-        arcade.draw_text("AGV", self.agv_x - 16, self.agv_y + 32, arcade.color.BLACK, 10, bold=True)
+        arcade.draw_text("ROBOT", self.robot_x - 24, self.robot_y + 32, arcade.color.BLACK, 9, bold=True)
+        arcade.draw_text("AGV", self.agv_x - 14, self.agv_y + 30, arcade.color.BLACK, 9, bold=True)
 
         self.draw_info_panel()
 
     def on_update(self, delta_time: float):
         self.move_humans()
 
-        self.robot_proximity_message = ""
-        self.update_robot_risk_state()
-
         intended_dx, intended_dy = self.build_manual_input_vector()
         if intended_dx != 0 or intended_dy != 0:
             safe_dx, safe_dy = self.build_safety_vector_for_robot(intended_dx, intended_dy)
-            self.try_move_robot(safe_dx, safe_dy)
+            moved = self.try_move_robot(safe_dx, safe_dy)
+            if not moved:
+                self.try_move_robot(intended_dx, intended_dy)
 
         self.update_robot_risk_state()
         self.update_robot_proximity_warning()
         self.check_goal()
 
         self.update_agv()
+        self.refresh_display_messages()
 
     # -----------------------------
     # Keyboard
