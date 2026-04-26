@@ -23,21 +23,38 @@ The simulation includes:
 - [`main.py`](./main.py): lightweight launcher that starts the simulation
 - [`gym_env.py`](./gym_env.py): auxiliary environment file in the repository
 
-## Requirements
-Make sure Python 3 is installed, then install the runtime dependency:
+## Installation and Setup
 
-```bash
-pip install arcade
-```
+To run this project from scratch, follow these steps:
 
-## Run The Simulation
-From the project folder, run:
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/yourusername/safe-rl-project.git
+   cd safe-rl-project
+   ```
+
+2. **Ensure Python 3.7+ is installed:**
+   - Check your Python version: `python --version`
+   - If not installed, download from [python.org](https://www.python.org/downloads/)
+
+3. **Install required libraries:**
+   This project requires the following Python library:
+   - `arcade` (for graphics and simulation)
+
+   Install it using pip:
+   ```bash
+   pip install arcade
+   ```
+
+## Running the Simulation
+
+Once installed, run the simulation from the project directory:
 
 ```bash
 python main.py
 ```
 
-You can also run:
+Alternatively, you can run the simulation directly:
 
 ```bash
 python simulation.py
