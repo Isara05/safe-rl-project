@@ -1,57 +1,84 @@
-# Simple Robot Simulation Environment
+# Warehouse Safety + RL PoC Simulation
 
 ## Overview
-This project is a simple 2D robot simulation environment created using Python and Pygame. It is designed as the starting point for a Safe Reinforcement Learning for Human–Robot Collaboration project.
+This project is a 2D warehouse safety simulation built with Python and Arcade. The current source of truth is [`simulation.py`](./simulation.py), which models a robot navigating toward a shared goal while interacting with static warehouse infrastructure and dynamic actors.
 
 The simulation includes:
-- a robot shown as a blue circle
-- a human shown as a red moving circle
-- a goal shown as a star
-- obstacles shown as black blocks
+- a robot that can run in Q-learning mode or manual override mode
+- a transit AGV with battery-aware charging behavior
+- a human worker, a humanoid worker, and an inspection quadruped
+- static warehouse objects such as racks, a cupboard, a table, chairs, a forklift, and a crane base
+- adaptive safety zones, collision blocking, near-miss tracking, and live safety metrics
 
-This basic environment can later be extended for collision detection, distance sensing, reward design, and reinforcement learning training.
+## Features
+- Warehouse floor layout with aisles, packing area, loading bay, and charging station
+- Q-learning proof of concept with discretized observations and reward shaping
+- Manual control fallback using the arrow keys
+- Safety-aware motion adjustment around dynamic and static obstacles
+- Live dashboard showing robot status, AGV state, safety metrics, and reward statistics
+- Goal tracking and task completion timing
 
-Requirements
+## Project Files
+- [`simulation.py`](./simulation.py): primary simulation implementation and main runtime
+- [`main.py`](./main.py): lightweight launcher that starts the simulation
+- [`gym_env.py`](./gym_env.py): auxiliary environment file in the repository
 
-Make sure Python is installed on your system.
+## Requirements
+Make sure Python 3 is installed, then install the runtime dependency:
 
-Install Pygame using:
+```bash
+pip install arcade
+```
 
-pip install pygame
+## Run The Simulation
+From the project folder, run:
 
-Move to the correct folder:
-
-cd /d D:\SWIN_3\Project_A (According to your saved drive and folder)
-
-Run the program:
-
+```bash
 python main.py
-Controls
+```
 
-Use the arrow keys to move the robot:
+You can also run:
 
-Up arrow → move up
-Down arrow → move down
-Left arrow → move left
-Right arrow → move right
-Project Components
-Robot
+```bash
+python simulation.py
+```
 
-**##Current Limitations**
+## Controls
+- `R`: toggle between RL mode and manual mode
+- `Left Arrow`: move left in manual mode
+- `Right Arrow`: move right in manual mode
+- `Up Arrow`: move up in manual mode
+- `Down Arrow`: move down in manual mode
 
-This is only the initial version of the simulation. At this stage:
+Pressing any arrow key while RL mode is active switches the robot into manual control.
 
-the robot is manually controlled
-there is no collision detection
-there is no reward function
-there is no reinforcement learning yet
-Future Improvements
+## What The Simulation Tracks
+The dashboard in the top-left of the window reports:
+- robot safety status and behavior
+- AGV battery level and charging state
+- collisions and near misses
+- minimum and average clearance
+- reward average
+- path-tracking RMSE and MAE
+- elapsed or completion time
 
-**##Possible future extensions include:**
+## Current Simulation Logic
+According to `simulation.py`, the robot:
+- starts in RL mode by default
+- moves toward a shared goal in the warehouse
+- slows down or stops when adaptive safety thresholds are violated
+- avoids both dynamic actors and nearby static objects
 
-collision detection with obstacles and human
-distance calculation to nearby objects
-state, action, and reward definitions
-reinforcement learning integration
-safe navigation logic
-automatic robot decision-making
+The AGV:
+- follows a route while battery is sufficient
+- switches to charging behavior when battery is low
+- resumes operation after recharging
+
+Dynamic actors:
+- follow waypoint routes
+- adjust speed and heading based on local safety conditions
+- maintain their own warning and danger zones
+
+## Notes
+- `main.py` is now only an entry point; the actual simulation logic lives in `simulation.py`.
+- The older Pygame-based prototype is no longer the active implementation described by this README.
