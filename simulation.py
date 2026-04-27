@@ -1,3 +1,10 @@
+"""Warehouse safety simulation with a simple Q-learning robot controller.
+
+This simulation uses a discretized observation space, a small discrete action
+set, and reward shaping to guide the robot toward a shared goal while
+avoiding static and dynamic obstacles.
+"""
+
 import arcade
 import math
 import random
@@ -106,6 +113,18 @@ ACTIONS = [
     (-1, -1),
     (1, -1),
     (0, 0),
+]
+
+ACTION_LABELS = [
+    "LEFT",
+    "RIGHT",
+    "UP",
+    "DOWN",
+    "UP-LEFT",
+    "UP-RIGHT",
+    "DOWN-LEFT",
+    "DOWN-RIGHT",
+    "HOLD",
 ]
 
 
@@ -286,12 +305,15 @@ class SafetyMetrics:
 
 
 class QLearningAgent:
+    """Simple tabular Q-learning agent for the warehouse robot."""
+
     def __init__(self):
         self.q_table = {}
         self.last_state = None
         self.last_action = None
 
     def discretize(self, observation):
+        """Convert raw observations into a compact discrete state tuple."""
         goal_sector = int(observation["goal_sector"])
         clearance_bucket = int(clamp(observation["clearance"] // 35, 0, 8))
         closing_bucket = int(clamp((observation["closing_speed"] + 2.5) // 1.0, 0, 6))
@@ -300,6 +322,7 @@ class QLearningAgent:
         return (goal_sector, clearance_bucket, closing_bucket, static_bucket, danger_flag)
 
     def select_action(self, state):
+        """Choose an action with epsilon-greedy selection."""
         if random.random() < RL_EPSILON or state not in self.q_table:
             return random.randrange(len(ACTIONS))
         values = self.q_table[state]
@@ -308,6 +331,7 @@ class QLearningAgent:
         return random.choice(best_actions)
 
     def update(self, state, action, reward, next_state):
+        """Update the Q-table using the Bellman equation."""
         self.q_table.setdefault(state, [0.0] * len(ACTIONS))
         self.q_table.setdefault(next_state, [0.0] * len(ACTIONS))
         old_value = self.q_table[state][action]
@@ -328,6 +352,7 @@ class WarehouseSimulation(arcade.Window):
         self.current_reward = 0.0
         self.last_observation_state = None
         self.last_action_index = None
+        self.last_action_label = "HOLD"
 
         self.left_pressed = False
         self.right_pressed = False
@@ -535,6 +560,7 @@ class WarehouseSimulation(arcade.Window):
         return self.distance_between(x, y, proj_x, proj_y)
 
     def build_robot_observation(self):
+        """Build the current observation used by the RL agent."""
         threat = self.nearest_dynamic_threat(self.robot_x, self.robot_y, ROBOT_RADIUS)
         goal_dx = self.goal_x - self.robot_x
         goal_dy = self.goal_y - self.robot_y
@@ -561,6 +587,16 @@ class WarehouseSimulation(arcade.Window):
             "static_clearance": static_clearance,
             "danger": danger,
         }
+
+    def compute_rl_reward(self, previous_goal_dist, new_goal_dist, moved):
+        """Compute reward for the RL agent based on progress and safety."""
+        reward = (previous_goal_dist - new_goal_dist) * 0.7
+        reward -= 0.01
+        reward += 0.04 if moved else -0.08
+        reward -= 0.35 if self.robot_status == "WARNING" else 0.0
+        reward -= 0.9 if self.robot_status == "HIGH RISK" else 0.0
+        reward += 15.0 if self.goal_reached else 0.0
+        return reward
 
     def set_robot_message(self, message, color=WARNING_COLOR):
         self.robot_message = message
@@ -722,6 +758,8 @@ class WarehouseSimulation(arcade.Window):
         observation = self.build_robot_observation()
         state = self.rl_agent.discretize(observation)
         action_index = self.rl_agent.select_action(state)
+        self.last_action_label = ACTION_LABELS[action_index]
+
         intended_dx, intended_dy = ACTIONS[action_index]
         intended_dx, intended_dy = normalize(intended_dx, intended_dy)
         safe_dx, safe_dy = self.build_safety_vector_for_robot(intended_dx, intended_dy)
@@ -731,15 +769,10 @@ class WarehouseSimulation(arcade.Window):
         self.check_goal()
         new_goal_dist = self.distance_between(self.robot_x, self.robot_y, self.goal_x, self.goal_y)
 
-        reward = (previous_goal_dist - new_goal_dist) * 0.7
-        reward -= 0.01
-        reward += 0.04 if moved else -0.08
-        reward -= 0.35 if self.robot_status == "WARNING" else 0.0
-        reward -= 0.9 if self.robot_status == "HIGH RISK" else 0.0
-        reward += 15.0 if self.goal_reached else 0.0
-
+        reward = self.compute_rl_reward(previous_goal_dist, new_goal_dist, moved)
         next_state = self.rl_agent.discretize(self.build_robot_observation())
         self.rl_agent.update(state, action_index, reward, next_state)
+
         self.current_reward = reward
         self.metrics.total_reward += reward
         self.metrics.reward_samples += 1
@@ -1081,6 +1114,10 @@ class WarehouseSimulation(arcade.Window):
         arcade.draw_text(f"Robot: {self.robot_status}", panel_x + 14, row_y, TEXT_COLOR, 10)
         arcade.draw_text(f"Behavior: {self.robot_behavior}", panel_x + 170, row_y, TEXT_COLOR, 10)
         arcade.draw_text(f"Speed: {self.robot_speed:.1f}", panel_x + 330, row_y, TEXT_COLOR, 10)
+
+        row_y -= 22
+        arcade.draw_text(f"Action: {self.last_action_label}", panel_x + 14, row_y, TEXT_COLOR, 10)
+        arcade.draw_text(f"Reward: {self.current_reward:.2f}", panel_x + 170, row_y, TEXT_COLOR, 10)
 
         row_y -= 22
         message = self.robot_message if time.time() <= self.robot_message_until else ""
