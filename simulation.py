@@ -852,9 +852,9 @@ class WarehouseSimulation(arcade.Window):
 
         if clearance <= danger_distance:
             actor.status = "HIGH RISK"
-            actor.safety_behavior = "STOP"
-            actor.message = f"Stop for {nearest_label}"
-            target_speed = 0.0
+            actor.safety_behavior = "AVOID"
+            actor.message = f"Avoid {nearest_label}"
+            target_speed = max(actor.speed_min * 0.35, 0.6)
         elif clearance <= safe_distance:
             actor.status = "WARNING"
             actor.safety_behavior = "SLOW"
@@ -1190,6 +1190,8 @@ class WarehouseSimulation(arcade.Window):
         else:
             intended_dx, intended_dy = self.build_manual_input_vector()
             if intended_dx != 0 or intended_dy != 0:
+                # Manual override should allow the driver to move again after a red stop.
+                self.robot_speed = ROBOT_BASE_SPEED
                 safe_dx, safe_dy = self.build_safety_vector_for_robot(intended_dx, intended_dy)
                 moved = self.try_move_robot(safe_dx, safe_dy)
                 if not moved:
