@@ -59,6 +59,34 @@ Alternatively, you can run the simulation directly:
 ```bash
 python simulation.py
 ```
+## Reinforcement Learning (RL) Details
+
+The robot uses a simple tabular Q-learning controller to learn a safe path toward the shared goal:
+
+- **State** is discretized from the robot's observation:
+  - goal direction sector (8 compass sectors)
+  - closest dynamic threat clearance bucket
+  - closing speed bucket of the most dangerous moving actor
+  - static obstacle clearance bucket
+  - danger flag if a dynamic threat is too close
+- **Actions** are the 9 discrete movement directions:
+  - `LEFT`, `RIGHT`, `UP`, `DOWN`, `UP-LEFT`, `UP-RIGHT`, `DOWN-LEFT`, `DOWN-RIGHT`, `HOLD`
+- **Reward shaping** encourages progress while penalizing unsafe behavior:
+  - positive reward for reducing distance to the goal
+  - small step penalty to discourage dithering
+  - bonus for moving successfully
+  - penalty for manual slow or high-risk states
+  - large reward for reaching the goal
+
+### Mode behavior
+
+- `R` toggles between RL mode and manual override.
+- pressing any arrow key automatically switches the robot to manual control.
+- in manual mode, the arrow keys control robot motion while safety-aware adjustments still avoid collisions.
+
+### Notes for third-party users
+
+This repository is intended as a proof of concept. The Q-learning controller does not yet persist a trained policy to disk, but it demonstrates learning from simulation experience during a session.
 
 ## Controls
 - `R`: toggle between RL mode and manual mode
