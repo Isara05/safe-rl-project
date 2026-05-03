@@ -172,7 +172,7 @@ The thresholds adapt using distance, object speed, and closing motion. This is m
 
 The simulation records RMSE and MAE for 2D path tracking. Actual values are the robot's measured positions, predicted values are the nearest points on the planned start-to-goal reference path, and absolute error is the Euclidean distance between them.
 
-Units are reported in metres using the simulation scale `20 pixels = 1 metre`.
+Units are reported in metres using the simulation scale `20 pixels = 1 metre`. The live dashboard also displays RMSE and MAE in metres so the on-screen values match the exported report.
 
 Press `E` while the simulation is running to export [`simulation_report.md`](./simulation_report.md), which includes:
 
@@ -217,7 +217,7 @@ The dashboard in the top-left of the window reports:
 - collisions and near misses
 - minimum and average clearance
 - reward average
-- path-tracking RMSE and MAE
+- path-tracking RMSE and MAE in metres
 - elapsed or completion time
 
 ## Current Simulation Logic
