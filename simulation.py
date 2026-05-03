@@ -1895,7 +1895,7 @@ class WarehouseSimulation(arcade.Window):
 
         current_time = self.completion_time if self.goal_reached else (time.time() - self.start_time)
         arcade.draw_text("Safety Dashboard", panel_x + 14, panel_y + 73, TEXT_COLOR, 13, bold=True)
-        arcade.draw_text(f"Time: {current_time:.1f}s", panel_x + 190, panel_y + 75, TEXT_COLOR, 9)
+        arcade.draw_text(f"Time: {current_time:.1f} s", panel_x + 190, panel_y + 75, TEXT_COLOR, 9)
 
         agv_mode_short = {
             "WORKING": "WORKING",
@@ -1920,8 +1920,8 @@ class WarehouseSimulation(arcade.Window):
         if dynamic_pair:
             pair_text = (
                 f"Nearest pair: {dynamic_pair['first'].kind}-{dynamic_pair['second'].kind} "
-                f"{px_to_meters(dynamic_pair['clearance']):.2f}m clear, "
-                f"rel speed {px_to_meters(dynamic_pair['relative_speed']):.2f}m/tick"
+                f"{px_to_meters(dynamic_pair['clearance']):.2f} m clear, "
+                f"rel speed {px_to_meters(dynamic_pair['relative_speed']):.2f} m/tick"
             )
         else:
             pair_text = "Nearest pair: waiting for dynamic objects"
@@ -1941,16 +1941,33 @@ class WarehouseSimulation(arcade.Window):
         arcade.draw_text(f"Mode: {'Shielded safety RL' if self.rl_enabled else 'manual control'}", section_xs[0], row_1, TEXT_COLOR, 8)
         arcade.draw_text(f"Agent: yellow RL robot | Status: {self.robot_status}", section_xs[0], row_2, TEXT_COLOR, 8)
         route_target = self.current_robot_route_target()
-        arcade.draw_text(f"Action: {self.last_action_label} | Speed: {self.robot_speed:.1f} | Route target: ({route_target[0]:.0f},{route_target[1]:.0f})", section_xs[0], row_3, TEXT_COLOR, 8)
+        arcade.draw_text(
+            (
+                f"Action: {self.last_action_label} | "
+                f"Speed: {px_to_meters(self.robot_speed):.2f} m/tick | "
+                f"Route target: ({px_to_meters(route_target[0]):.1f},"
+                f"{px_to_meters(route_target[1]):.1f}) m"
+            ),
+            section_xs[0],
+            row_3,
+            TEXT_COLOR,
+            8,
+        )
 
         arcade.draw_text("2. Reward and penalties", section_xs[1], title_y, INFO_COLOR, 9, bold=True)
-        arcade.draw_text(f"Current reward: {self.current_reward:.2f} | average: {self.metrics.average_reward:.2f}", section_xs[1], row_1, TEXT_COLOR, 8)
+        arcade.draw_text(
+            f"Current reward: {self.current_reward:.2f} pts | average: {self.metrics.average_reward:.2f} pts",
+            section_xs[1],
+            row_1,
+            TEXT_COLOR,
+            8,
+        )
         arcade.draw_text("+10 safe move | +reward for more clearance", section_xs[1], row_2, TEXT_COLOR, 8)
         arcade.draw_text("Shared goal = robot target | +20 when reached", section_xs[1], row_3, TEXT_COLOR, 8)
 
         arcade.draw_text("3. AGV and charging", section_xs[2], title_y, INFO_COLOR, 9, bold=True)
         arcade.draw_text("Agents follow realistic task routes via safe waypoints", section_xs[2], row_1, TEXT_COLOR, 8)
-        arcade.draw_text(f"Battery: {self.agv_battery:.0f}% | AGV state: {self.agv_actor.status}", section_xs[2], row_2, TEXT_COLOR, 8)
+        arcade.draw_text(f"Battery: {self.agv_battery:.0f} % | AGV state: {self.agv_actor.status}", section_xs[2], row_2, TEXT_COLOR, 8)
         arcade.draw_text(f"Mode: {agv_mode_short} ({agv_explain})", section_xs[2], row_3, TEXT_COLOR, 8)
 
         arcade.draw_text("4. Safety and evaluation", section_xs[3], title_y, INFO_COLOR, 9, bold=True)
