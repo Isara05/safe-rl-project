@@ -651,9 +651,12 @@ class WarehouseSimulation(arcade.Window):
             "State: distance, speed, position, heading.",
             "Actions: move, slow, stop, hold.",
             "Reward: +10 safe, -10 risk/collision.",
-            "Metrics: actual, predicted, abs error.",
+            self.path_tracking_si_summary(),
             "Tools: Blender + NVIDIA Omniverse for 3D.",
         ]
+
+    def path_tracking_si_summary(self):
+        return f"RMSE: {self.metrics.rmse_m:.3f} m | MAE: {self.metrics.mae_m:.3f} m"
 
     def distance_between(self, x1, y1, x2, y2):
         return math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
@@ -1972,7 +1975,7 @@ class WarehouseSimulation(arcade.Window):
 
         arcade.draw_text("4. Safety and evaluation", section_xs[3], title_y, INFO_COLOR, 9, bold=True)
         arcade.draw_text(f"Alert: {message or 'None'}", section_xs[3], row_1, self.robot_message_color if message else TEXT_COLOR, 8)
-        arcade.draw_text("Safety circle: green safe, yellow warning, red danger", section_xs[3], row_2, TEXT_COLOR, 8)
+        arcade.draw_text(self.path_tracking_si_summary(), section_xs[3], row_2, TEXT_COLOR, 8)
         arcade.draw_text(pair_text, section_xs[3], row_3, TEXT_COLOR, 8)
 
         arcade.draw_text("Controls: arrows manual | R toggle RL | E export report", panel_x + 1245, panel_y + 75, (70, 76, 88), 8)
@@ -1987,7 +1990,7 @@ class WarehouseSimulation(arcade.Window):
         arcade.draw_text("Summary", panel_x + 14, panel_y + panel_h - 24, INFO_COLOR, 13, bold=True)
 
         y = panel_y + panel_h - 44
-        for line in self.dashboard_lines:
+        for line in self.build_strategy_summary():
             wrapped_lines = wrap_text_lines(line, 38)
             for wrapped_line in wrapped_lines:
                 arcade.draw_text(wrapped_line, panel_x + 14, y, TEXT_COLOR, 8)
