@@ -1,3 +1,27 @@
+# Safe Reinforcement Learning for Warehouse Safety 🤖
+
+**Python · Arcade · Q-learning · Human–Robot Collaboration · Safety Monitoring**
+
+An academic warehouse simulation exploring safety-aware autonomous navigation around human workers, other robots, and static obstacles. The repository contains a **2D Python/Arcade proof of concept** combining tabular Q-learning with adaptive safety zones, AGV charging behaviour, manual override, and a live performance dashboard.
+
+### Key features
+- Tabular Q-learning agent navigating toward a goal
+- Green/warning/danger safety states and collision-risk handling
+- Moving workers, robots, and an automated guided vehicle (AGV)
+- Live dashboard for collisions, near misses, rewards, and path-tracking RMSE/MAE
+- Manual control for interactive testing
+
+### My contribution
+Within the broader team capstone, I worked on reinforcement-learning research and implementation, movement and collision debugging, dashboard development, testing, and Scrum Master coordination. The broader project also explored Blender-based 3D simulation; **this repository documents the 2D Arcade implementation**.
+
+**Quick start:** `pip install arcade` followed by `python main.py`.
+
+> **Scope:** Academic proof of concept, not a certified control system for physical robots.
+
+---
+
+## Detailed technical documentation
+
 # Warehouse Safety + RL PoC Simulation
 
 ## Overview
